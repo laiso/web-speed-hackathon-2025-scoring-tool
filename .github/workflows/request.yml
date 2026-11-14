@@ -6,6 +6,12 @@ on:
   issue_comment:
     types:
       - created
+  workflow_dispatch:
+    inputs:
+      application_url:
+        description: '計測対象の URL（例: http://3.82.52.58:8002）'
+        required: true
+        type: string
 env:
   TZ: 'Asia/Tokyo'
 jobs:
@@ -58,3 +64,33 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TZ: 'Asia/Tokyo'
           TARGET_URL: ${{ fromJSON(steps.issue-parsed.outputs.payload).url }}
+
+  dispatch:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # renovate: tag=v4.2.2
+        with:
+          fetch-depth: 0
+      - run: |
+          curl https://mise.run | sh
+          echo "$HOME/.local/share/mise/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
+          mise install
+        env:
+          MISE_VERSION: '2025.3.2'
+      - run: |
+          pnpm install --frozen-lockfile
+      - run: |
+          google-chrome --version || true
+          nproc; free -g | head -2
+          echo "scoring start: $(date -Is)"
+          # GITHUB_ACTIONS が設定されていると GitHubWriter（Issue 前提）が使われて失敗するので、
+          # dispatch 実行では外して CLIWriter に出力させる
+          env -u GITHUB_ACTIONS -u GITHUB_TOKEN pnpm start --applicationUrl "${TARGET_URL}"
+          echo "scoring end: $(date -Is)"
+        env:
+          TZ: 'Asia/Tokyo'
+          TARGET_URL: ${{ inputs.application_url }}
