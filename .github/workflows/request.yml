@@ -97,12 +97,13 @@ jobs:
           AZ=$(curl -s --max-time 3 -H Metadata:true "http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01" | jq -c '{location,vmSize,zone}' 2>/dev/null)
           echo "${AZ:-azure_imds: unreachable}"
           echo "## AWS IMDSv2 (169.254.169.254)"
-          TOKEN=$(curl -s --max-time 3 -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60" || true)
-          if [ -n "$TOKEN" ] && curl -s --max-time 3 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region >/dev/null 2>&1; then
-            echo "aws_imds: region=$(curl -s --max-time 3 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)"
-          else
-            echo "aws_imds: unreachable"
+          TOKEN=$(curl -s --max-time 3 -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60" -w '\n%{http_code}' 2>/dev/null || true)
+          CODE=$(echo "$TOKEN" | tail -1); TOKEN=$(echo "$TOKEN" | head -1)
+          AWSAZ=""
+          if [ "$CODE" = "200" ]; then
+            AWSAZ=$(curl -s --max-time 3 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone 2>/dev/null)
           fi
+          if echo "$AWSAZ" | grep -qE '^[a-z]{2}(-[a-z]+)+-[0-9][a-z]$'; then echo "aws_imds: az=${AWSAZ}"; else echo "aws_imds: unreachable"; fi
           echo "## target timing (${TARGET_URL})"
           for p in / /api/channels; do
             for i in 1 2 3; do
