@@ -12,6 +12,10 @@ on:
         description: '計測対象の URL（例: http://3.82.52.58:8002）'
         required: true
         type: string
+      sequence:
+        description: '（実験用）空白区切りの計測対象 URL 列。指定時は同一ジョブ内で順に計測する'
+        required: false
+        type: string
 env:
   TZ: 'Asia/Tokyo'
 jobs:
@@ -114,7 +118,20 @@ jobs:
           done
         env:
           TARGET_URL: ${{ inputs.application_url }}
-      - run: |
+      - name: Sequence warm-up (all targets, before any scoring)
+        if: inputs.sequence != ''
+        run: |
+          for u in $(echo "${SEQUENCE}" | tr ' ' '\n' | sort -u); do
+            for p in / /api/channels /public/main.js; do
+              curl -s -o /tmp/seq.bin --max-time 60 -w "warm ${u}${p} code=%{http_code} size=%{size_download} ttfb=%{time_starttransfer}s\n" "${u%/}${p}"
+              echo "sha256=$(sha256sum /tmp/seq.bin | cut -c1-16)"
+            done
+          done
+        env:
+          SEQUENCE: ${{ inputs.sequence }}
+      - name: Scoring (single target)
+        if: inputs.sequence == ''
+        run: |
           google-chrome --version || true
           nproc; free -g | head -2
           echo "scoring start: $(date -Is)"
@@ -125,3 +142,21 @@ jobs:
         env:
           TZ: 'Asia/Tokyo'
           TARGET_URL: ${{ inputs.application_url }}
+      - name: Scoring (sequence, same runner)
+        if: inputs.sequence != ''
+        run: |
+          google-chrome --version || true
+          nproc; free -g | head -2
+          grep -m1 'model name' /proc/cpuinfo || true
+          n=0
+          for TARGET_URL in ${SEQUENCE}; do
+            n=$((n+1))
+            echo "### seq ${n} target=${TARGET_URL}"
+            echo "scoring start: $(date -Is)"
+            env -u GITHUB_ACTIONS -u GITHUB_TOKEN pnpm start --applicationUrl "${TARGET_URL}"
+            echo "scoring end: $(date -Is)"
+            echo "### seq ${n} end"
+          done
+        env:
+          TZ: 'Asia/Tokyo'
+          SEQUENCE: ${{ inputs.sequence }}
